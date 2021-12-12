@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: 2010-09-09
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'Cost Allocation Tag'
+        Parameters:
+          - CostAllocTag
+      - Label:
+          default: 'EC2 Configuration'
+        Parameters:
+          - VpcId
+          - ImageId
+Parameters:
+  CostAllocTag:
+    Type: 'String'
+    Default: 'aws-sso-ec2-windows-server'
+
+  VpcId:
+    Type: 'AWS::EC2::VPC::Id'
+    Default: ''
+
+  ImageId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-windows-latest/Windows_Server-2022-Japanese-Full-Base'
+    AllowedValues:
+      - '/aws/service/ami-windows-latest/Windows_Server-2022-Japanese-Full-Base'
+      - '/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base'
+Resources:
+
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      IamInstanceProfile: !Ref IAMInstanceProfile
+      ImageId: !Ref ImageId
+      InstanceType: 't2.micro'
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeleteOnTermination: true
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref EC2SecurityGroup
+      Tags:
+        - Key: 'environment'
+          Value: !Ref CostAllocTag
+
+  EC2SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'aws sso test'
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: 'environment'
+          Value: !Ref CostAllocTag
+
+  IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: 'Allow'
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Path: '/'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Tags:
+        - Key: 'environment'
+          Value: !Ref CostAllocTag
+
+  IAMInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - !Ref IAMRole
