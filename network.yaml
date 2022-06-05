@@ -1,9 +1,34 @@
 AWSTemplateFormatVersion: 2010-09-09
+# Metadata: [TODO]
+#   AWS::CloudFormation::Interface:
+#     ParameterGroups:
+#       -
+#         Label:
+#           default: Global
+#         Parameters:
+#           - AllowIP
+#           - SplunkDeploy
+#       -
+#         Label:
+#           default: If you set the Splunkdeploy parameter to true, the following parameters are required
+#         Parameters:
+#           - PortforSplunk
+#           - PasswordforSplunk
+
+#   Project
+#   Environment
+#   EC2VPCCidrBlock
+#   SubnetCidrBits
+#   NetworkRedundancy
+#   NetworkLayer
+
 Parameters:
   Project:
+    Description: ''
     Type: 'String'
-    Default: ''
+    Default: 'my-sample-network'
   Environment:
+    Description: ''
     Type: 'String'
     Default: 'stg'
     AllowedValues:
@@ -11,25 +36,30 @@ Parameters:
       - 'prod'
       - 'stg'
   EC2VPCCidrBlock:
+    Description: ''
     Type: 'String'
     Default: '10.0.0.0/16'
   SubnetCidrBits:
+    Description: ''
     Type: 'Number'
     Default: 8
     MaxValue: 16
     MinValue: 0
   NetworkRedundancy:
+    Description: ''
     Type: 'String'
     Default: 'multi-az-3'
     AllowedValues:
       - 'multi-az-2'
       - 'multi-az-3'
   NetworkLayer:
+    Description: ''
     Type: 'String'
     Default: 'public-private'
     AllowedValues:
       - 'public-private'
       - 'public-application-database'
+
 Conditions:
   ThreeTier: !Equals [!Ref NetworkLayer, 'public-application-database']
   ThreeAZ:  !Equals [!Ref NetworkRedundancy, 'multi-az-3']
