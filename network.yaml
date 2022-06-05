@@ -1,0 +1,586 @@
+AWSTemplateFormatVersion: 2010-09-09
+# Metadata: [TODO]
+#   AWS::CloudFormation::Interface:
+#     ParameterGroups:
+#       -
+#         Label:
+#           default: Global
+#         Parameters:
+#           - AllowIP
+#           - SplunkDeploy
+#       -
+#         Label:
+#           default: If you set the Splunkdeploy parameter to true, the following parameters are required
+#         Parameters:
+#           - PortforSplunk
+#           - PasswordforSplunk
+
+#   Project
+#   Environment
+#   EC2VPCCidrBlock
+#   SubnetCidrBits
+#   NetworkRedundancy
+#   NetworkLayer
+
+Parameters:
+  Project:
+    Description: ''
+    Type: 'String'
+    Default: 'my-sample-network'
+  Environment:
+    Description: ''
+    Type: 'String'
+    Default: 'stg'
+    AllowedValues:
+      - 'dev'
+      - 'prod'
+      - 'stg'
+  EC2VPCCidrBlock:
+    Description: ''
+    Type: 'String'
+    Default: '10.0.0.0/16'
+  SubnetCidrBits:
+    Description: ''
+    Type: 'Number'
+    Default: 8
+    MaxValue: 16
+    MinValue: 0
+  NetworkRedundancy:
+    Description: ''
+    Type: 'String'
+    Default: 'multi-az-3'
+    AllowedValues:
+      - 'multi-az-2'
+      - 'multi-az-3'
+  NetworkLayer:
+    Description: ''
+    Type: 'String'
+    Default: 'public-private'
+    AllowedValues:
+      - 'public-private'
+      - 'public-application-database'
+
+Conditions:
+  ThreeTier: !Equals [!Ref NetworkLayer, 'public-application-database']
+  ThreeAZ:  !Equals [!Ref NetworkRedundancy, 'multi-az-3']
+  FullSize: !And
+    - !Equals [!Ref NetworkLayer, 'public-application-database']
+    - !Equals [!Ref NetworkRedundancy, 'multi-az-3']
+
+Resources:
+  EC2VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref EC2VPCCidrBlock
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: 'default'
+      # Ipv4IpamPoolId: String
+      # Ipv4NetmaskLength: Integer
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-vpc'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  EC2InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-igw'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  EC2VPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      InternetGatewayId: !Ref EC2InternetGateway
+      VpcId: !Ref EC2VPC
+
+  EC2VPCDHCPOptionsAssociation:
+    Type: 'AWS::EC2::VPCDHCPOptionsAssociation'
+    Properties:
+      DhcpOptionsId: !Ref EC2DHCPOptions
+      VpcId: !Ref EC2VPC
+
+  EC2DHCPOptions:
+    Type: 'AWS::EC2::DHCPOptions'
+    Properties:
+      DomainName: !Sub '${AWS::Region}.compute.internal'
+      DomainNameServers:
+        - 'AmazonProvidedDNS'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-dopt'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+# AZ1st
+# ==============================
+  EC2SubnetPublicAZ1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [0, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-public-az1'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePublicAZ1:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-public-rt-az1'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPublicAZ1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePublicAZ1
+      SubnetId: !Ref EC2SubnetPublicAZ1
+
+  EC2RouteIPv4PublicAZ1:
+    DependsOn: EC2VPCGatewayAttachment
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref EC2InternetGateway
+      RouteTableId: !Ref EC2RouteTablePublicAZ1
+
+  EC2SubnetPrivate1AZ1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [1, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !If
+            - ThreeTier
+            - !Sub '${Project}-${Environment}-private-application-az1'
+            - !Sub '${Project}-${Environment}-private-az1'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePrivate1AZ1:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !If
+            - ThreeTier
+            - !Sub '${Project}-${Environment}-rt-private-application-az1'
+            - !Sub '${Project}-${Environment}-rt-private-az1'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPrivate1AZ1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePrivate1AZ1
+      SubnetId: !Ref EC2SubnetPrivate1AZ1
+
+  EC2RouteIPv4Private1AZ1:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref EC2NatGatewayAZ1
+      RouteTableId: !Ref EC2RouteTablePrivate1AZ1
+
+  EC2EIPNatGatewayAZ1:
+    Type: 'AWS::EC2::EIP'
+    DependsOn: EC2VPCGatewayAttachment
+    Properties:
+      Domain: 'vpc'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-eip-nat-az1'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  EC2NatGatewayAZ1:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt EC2EIPNatGatewayAZ1.AllocationId
+      SubnetId: !Ref EC2SubnetPublicAZ1
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-nat-az1'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  EC2SubnetPrivate2AZ1:
+    Condition: ThreeTier
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [2, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-private-database-az1'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePrivate2AZ1:
+    Condition: ThreeTier
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-rt-private-database-az1'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPrivate2AZ1:
+    Condition: ThreeTier
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePrivate2AZ1
+      SubnetId: !Ref EC2SubnetPrivate2AZ1
+
+# AZ2
+# ==============================
+  EC2SubnetPublicAZ2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [3, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-public-az2'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePublicAZ2:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-public-rt-az2'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPublicAZ2:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePublicAZ2
+      SubnetId: !Ref EC2SubnetPublicAZ2
+
+  EC2RouteIPv4PublicAZ2:
+    DependsOn: EC2VPCGatewayAttachment
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref EC2InternetGateway
+      RouteTableId: !Ref EC2RouteTablePublicAZ2
+
+  EC2SubnetPrivate1AZ2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [4, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !If
+            - ThreeTier
+            - !Sub '${Project}-${Environment}-private-application-az2'
+            - !Sub '${Project}-${Environment}-private-az2'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePrivate1AZ2:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !If
+            - ThreeTier
+            - !Sub '${Project}-${Environment}-rt-private-application-az2'
+            - !Sub '${Project}-${Environment}-rt-private-az2'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPrivate1AZ2:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePrivate1AZ2
+      SubnetId: !Ref EC2SubnetPrivate1AZ2
+
+  EC2RouteIPv4Private1AZ2:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref EC2NatGatewayAZ2
+      RouteTableId: !Ref EC2RouteTablePrivate1AZ2
+
+  EC2EIPNatGatewayAZ2:
+    Type: 'AWS::EC2::EIP'
+    DependsOn: EC2VPCGatewayAttachment
+    Properties:
+      Domain: 'vpc'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-eip-nat-az2'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  EC2NatGatewayAZ2:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt EC2EIPNatGatewayAZ2.AllocationId
+      SubnetId: !Ref EC2SubnetPublicAZ2
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-nat-az2'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  EC2SubnetPrivate2AZ2:
+    Condition: ThreeTier
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [5, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-private-database-az2'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePrivate2AZ2:
+    Condition: ThreeTier
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-rt-private-database-az2'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPrivate2AZ2:
+    Condition: ThreeTier
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePrivate2AZ2
+      SubnetId: !Ref EC2SubnetPrivate2AZ2
+
+# AZ3
+# ==============================
+  EC2SubnetPublicAZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [6, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-public-az3'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePublicAZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-public-rt-az3'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPublicAZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePublicAZ3
+      SubnetId: !Ref EC2SubnetPublicAZ3
+
+  EC2RouteIPv4PublicAZ3:
+    Condition: ThreeAZ
+    DependsOn: EC2VPCGatewayAttachment
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref EC2InternetGateway
+      RouteTableId: !Ref EC2RouteTablePublicAZ3
+
+  EC2SubnetPrivate1AZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [7, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !If
+            - ThreeTier
+            - !Sub '${Project}-${Environment}-private-application-az3'
+            - !Sub '${Project}-${Environment}-private-az3'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePrivate1AZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !If
+            - ThreeTier
+            - !Sub '${Project}-${Environment}-rt-private-application-az3'
+            - !Sub '${Project}-${Environment}-rt-private-az3'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPrivate1AZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePrivate1AZ3
+      SubnetId: !Ref EC2SubnetPrivate1AZ3
+
+  EC2RouteIPv4Private1AZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref EC2NatGatewayAZ3
+      RouteTableId: !Ref EC2RouteTablePrivate1AZ3
+
+  EC2EIPNatGatewayAZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::EIP'
+    DependsOn: EC2VPCGatewayAttachment
+    Properties:
+      Domain: 'vpc'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-eip-nat-az3'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  EC2NatGatewayAZ3:
+    Condition: ThreeAZ
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt EC2EIPNatGatewayAZ3.AllocationId
+      SubnetId: !Ref EC2SubnetPublicAZ3
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-nat-az3'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+
+  EC2SubnetPrivate2AZ3:
+    Condition: FullSize
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [8, !Cidr [ !Ref EC2VPCCidrBlock, 9, !Ref SubnetCidrBits ]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-private-database-az3'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2RouteTablePrivate2AZ3:
+    Condition: FullSize
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Project}-${Environment}-rt-private-database-az3'
+        - Key: 'project'
+          Value: !Ref Project
+        - Key: 'environment'
+          Value: !Ref Environment
+      VpcId: !Ref EC2VPC
+
+  EC2SubnetRouteTableAssociationPrivate2AZ3:
+    Condition: FullSize
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref EC2RouteTablePrivate2AZ3
+      SubnetId: !Ref EC2SubnetPrivate2AZ3
