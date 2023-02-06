@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  PrimaryAccountId:
+    Type: String
+    ConstraintDescription: '[0-9]+'
+    MaxLength: 12
+    MinLength: 12
+  LinkedAccountIds:
+    Type: CommaDelimitedList
+    ConstraintDescription: '[0-9,]+'
+  BillingGroupName:
+    Type: String
+    MaxLength: 128
+    MinLength: 1
+    ConstraintDescription: '[a-zA-Z0-9-_]+'
+Resources:
+  BillingConductorBillingGroup:
+    Type: AWS::BillingConductor::BillingGroup
+    Properties: 
+      AccountGrouping: 
+        LinkedAccountIds: !Ref LinkedAccountIds
+      ComputationPreference: 
+        PricingPlanArn: !GetAtt BillingConductorPricingPlan.Arn
+      Description: 'managed by cloudformation'
+      Name: !Ref BillingGroupName
+      PrimaryAccountId: !Ref PrimaryAccountId
+      # Tags: 
+      #   - Tag
+
+  BillingConductorPricingPlan:
+    Type: AWS::BillingConductor::PricingPlan
+    Properties: 
+      Description: 'managed by cloudformation'
+      Name: 'sample-plan'
+      PricingRuleArns: 
+        - !GetAtt BillingConductorPricingRule.Arn
+      # Tags: 
+      #   - Tag
+
+  BillingConductorPricingRule:
+    Type: AWS::BillingConductor::PricingRule
+    Properties: 
+      # BillingEntity: String
+      Description: 'managed by cloudformation'
+      ModifierPercentage: 0.1
+      Name: 'sample-rule-markup-10-percent'
+      # Operation: String
+      Scope: 'GLOBAL'
+      # Service: String
+      # Tags: 
+      #   - Tag
+      # Tiering: 
+      #   Tiering
+      Type: 'MARKUP'
+      # UsageType: String
