@@ -30,20 +30,15 @@ Parameters:
       - me-central-1
       - sa-east-1
 
-  LogArchiveAccountId:
+  S3BucketName:
     Type: String
-    ConstraintDescription: '[0-9]+'
-    MaxLength: 12
-    MinLength: 12
 
-  AuditAccountId:
+  SnsTopicARN:
     Type: String
-    ConstraintDescription: '[0-9]+'
-    MaxLength: 12
-    MinLength: 12
 
-  KmsKeyId:
+  KmsKeyArn:
     Type: String
+    Default: 'null'
 
   OrgId:
     Type: String
@@ -60,6 +55,8 @@ Conditions:
     # - !Equals [!Ref AWS::Region, 'us-east-1']
     # - !Equals [!Ref AWS::Region, '']
     # - !Equals [!Ref AWS::Region, '']
+
+  hasKmsKeyId: !Not [!Equals [!Ref KmsKeyId, 'null']]
 Resources:
   ConfigConfigurationRecorder:
     Type: AWS::Config::ConfigurationRecorder
@@ -81,10 +78,14 @@ Resources:
       # Name: ''
       ConfigSnapshotDeliveryProperties:
         DeliveryFrequency: TwentyFour_Hours
-      S3BucketName: !Sub 'aws-controltower-logs-${LogArchiveAccountId}-${HomeRegion}'
+      S3BucketName: !Ref S3BucketName
       S3KeyPrefix: !Ref OrgId
-      S3KmsKeyArn: !Sub 'arn:aws:kms:${HomeRegion}:${AWS::AccountId}:key/${KmsKeyId}'
+      S3KmsKeyArn: !If
+        - hasKmsKeyId
+        - !Ref KmsKeyArn
+        - !Ref AWS::NoValue
       SnsTopicARN: !If
         - IsAllowedRegionByControlTower
-        - !Sub 'arn:aws:sns:${AWS::Region}:${AuditAccountId}:aws-controltower-AllConfigNotifications'
+        - !Ref SnsTopicARN
         - !Ref AWS::NoValue
+
