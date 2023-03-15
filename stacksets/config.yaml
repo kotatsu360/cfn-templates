@@ -49,20 +49,20 @@ Parameters:
 Conditions:
   IsHomeRegionOfControlTower: !Equals [!Ref 'AWS::Region', !Ref HomeRegion]
 
-  IsAllowedRegionByControlTower: !Or
+  IsAllowedRegionByControlTower:
     - !Equals [!Ref 'AWS::Region', !Ref HomeRegion]
 
+    # !Or
+    # - !Equals [!Ref 'AWS::Region', !Ref HomeRegion]
     # - !Equals [!Ref AWS::Region, 'us-east-1']
     # - !Equals [!Ref AWS::Region, '']
     # - !Equals [!Ref AWS::Region, '']
 
-  hasKmsKeyId: !Not [!Equals [!Ref KmsKeyId, 'null']]
+  hasKmsKeyArn: !Not [!Equals [!Ref KmsKeyArn, 'null']]
 Resources:
   ConfigConfigurationRecorder:
     Type: AWS::Config::ConfigurationRecorder
     Properties:
-
-      # Name: CHANGEME
       RecordingGroup:
         AllSupported: true
         IncludeGlobalResourceTypes: !If
@@ -74,18 +74,15 @@ Resources:
   ConfigDeliveryChannel:
     Type: AWS::Config::DeliveryChannel
     Properties:
-
-      # Name: ''
       ConfigSnapshotDeliveryProperties:
         DeliveryFrequency: TwentyFour_Hours
       S3BucketName: !Ref S3BucketName
       S3KeyPrefix: !Ref OrgId
       S3KmsKeyArn: !If
-        - hasKmsKeyId
+        - hasKmsKeyArn
         - !Ref KmsKeyArn
         - !Ref AWS::NoValue
       SnsTopicARN: !If
         - IsAllowedRegionByControlTower
         - !Ref SnsTopicARN
         - !Ref AWS::NoValue
-
