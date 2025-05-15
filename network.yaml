@@ -1,28 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
-# Metadata: [TODO]
-#   AWS::CloudFormation::Interface:
-#     ParameterGroups:
-#       -
-#         Label:
-#           default: Global
-#         Parameters:
-#           - AllowIP
-#           - SplunkDeploy
-#       -
-#         Label:
-#           default: If you set the Splunkdeploy parameter to true, the following parameters are required
-#         Parameters:
-#           - PortforSplunk
-#           - PasswordforSplunk
-
-
-#   Project
-#   Environment
-#   EC2VPCCidrBlock
-#   SubnetCidrBits
-#   NetworkRedundancy
-#   NetworkLayer
 Parameters:
   Project:
     Description: ""
@@ -66,6 +43,33 @@ Parameters:
       - public-application-database
     Default: public-private
 
+  AZIDs:
+    Description: ""
+    Type: CommaDelimitedList
+
+Mappings:
+  AZIndexMap:
+    "1":
+      First: 0
+    "2":
+      First: 1
+    "3":
+      First: 2
+
+  SubnetIndexMap:
+    "1":
+      First: 0
+      Second: 1
+      Third: 2
+    "2":
+      First: 3
+      Second: 4
+      Third: 5
+    "3":
+      First: 6
+      Second: 7
+      Third: 8
+
 Conditions:
   ThreeTier: !Equals
     - !Ref NetworkLayer
@@ -75,13 +79,7 @@ Conditions:
     - !Ref NetworkRedundancy
     - multi-az-3
 
-  FullSize: !And
-    - !Equals
-      - !Ref NetworkLayer
-      - public-application-database
-    - !Equals
-      - !Ref NetworkRedundancy
-      - multi-az-3
+Transform: AWS::LanguageExtensions
 
 Resources:
   EC2VPC:
@@ -97,10 +95,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${Project}-${Environment}-vpc
-        - Key: project
-          Value: !Ref Project
-        - Key: environment
-          Value: !Ref Environment
 
   EC2InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -108,10 +102,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${Project}-${Environment}-igw
-        - Key: project
-          Value: !Ref Project
-        - Key: environment
-          Value: !Ref Environment
 
   EC2VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -134,24 +124,30 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${Project}-${Environment}-dopt
-        - Key: project
-          Value: !Ref Project
-        - Key: environment
-          Value: !Ref Environment
 
   Fn::ForEach::AZs:
-    - Index
-    - - 1
-      - 2
-      - 3
-    - EC2SubnetPublicAZ{$INDEX}:
+    - AZIndex
+    - !If
+      - ThreeAZ
+      - - "1"
+        - "2"
+        - "3"
+      - - "1"
+        - "2"
+    - EC2SubnetPublicAZ${AZIndex}:
         Type: AWS::EC2::Subnet
         Properties:
-          AvailabilityZone: !Select
-            - 0
-            - !GetAZs
+          AvailabilityZoneId: !Select
+            - Fn::FindInMap:
+                - AZIndexMap
+                - !Sub ${AZIndex}
+                - First
+            - !Ref AZIDs
           CidrBlock: !Select
-            - 0
+            - Fn::FindInMap:
+                - SubnetIndexMap
+                - !Sub ${AZIndex}
+                - First
             - !Cidr
               - !Ref EC2VPCCidrBlock
               - 9
@@ -159,43 +155,44 @@ Resources:
           MapPublicIpOnLaunch: true
           Tags:
             - Key: Name
-              Value: !Sub ${Project}-${Environment}-public-az{$index}
-            - Key: project
-              Value: !Ref Project
-            - Key: environment
-              Value: !Ref Environment
+              Value: !Sub ${Project}-${Environment}-public-az${AZIndex}
           VpcId: !Ref EC2VPC
-      EC2RouteTablePublicAZ{$INDEX}:
+      EC2RouteTablePublicAZ${AZIndex}:
         Type: AWS::EC2::RouteTable
         Properties:
           Tags:
             - Key: Name
-              Value: !Sub ${Project}-${Environment}-public-rt-az{$index}
-            - Key: project
-              Value: !Ref Project
-            - Key: environment
-              Value: !Ref Environment
+              Value: !Sub ${Project}-${Environment}-public-rt-az${AZIndex}
           VpcId: !Ref EC2VPC
-      EC2SubnetRouteTableAssociationPublicAZ{$INDEX}:
+      EC2SubnetRouteTableAssociationPublicAZ${AZIndex}:
         Type: AWS::EC2::SubnetRouteTableAssociation
         Properties:
-          RouteTableId: !Ref EC2RouteTablePublicAZ{$INDEX}
-          SubnetId: !Ref EC2SubnetPublicAZ{$INDEX}
-      EC2RouteIPv4PublicAZ{$INDEX}:
+          RouteTableId: !Ref
+            Fn::Sub: EC2RouteTablePublicAZ${AZIndex}
+          SubnetId: !Ref
+            Fn::Sub: EC2SubnetPublicAZ${AZIndex}
+      EC2RouteIPv4PublicAZ${AZIndex}:
         DependsOn: EC2VPCGatewayAttachment
         Type: AWS::EC2::Route
         Properties:
           DestinationCidrBlock: 0.0.0.0/0
           GatewayId: !Ref EC2InternetGateway
-          RouteTableId: !Ref EC2RouteTablePublicAZ{$INDEX}
-      EC2SubnetPrivate1AZ{$INDEX}:
+          RouteTableId: !Ref
+            Fn::Sub: EC2RouteTablePublicAZ${AZIndex}
+      EC2SubnetPrivate1AZ${AZIndex}:
         Type: AWS::EC2::Subnet
         Properties:
-          AvailabilityZone: !Select
-            - 0
-            - !GetAZs
+          AvailabilityZoneId: !Select
+            - Fn::FindInMap:
+                - AZIndexMap
+                - !Sub ${AZIndex}
+                - First
+            - !Ref AZIDs
           CidrBlock: !Select
-            - 1
+            - Fn::FindInMap:
+                - SubnetIndexMap
+                - !Sub ${AZIndex}
+                - Second
             - !Cidr
               - !Ref EC2VPCCidrBlock
               - 9
@@ -205,71 +202,69 @@ Resources:
             - Key: Name
               Value: !If
                 - ThreeTier
-                - !Sub ${Project}-${Environment}-private-application-az{$index}
-                - !Sub ${Project}-${Environment}-private-az{$index}
-            - Key: project
-              Value: !Ref Project
-            - Key: environment
-              Value: !Ref Environment
+                - !Sub ${Project}-${Environment}-private-application-az${AZIndex}
+                - !Sub ${Project}-${Environment}-private-az${AZIndex}
           VpcId: !Ref EC2VPC
-      EC2RouteTablePrivate1AZ{$INDEX}:
+      EC2RouteTablePrivate1AZ${AZIndex}:
         Type: AWS::EC2::RouteTable
         Properties:
           Tags:
             - Key: Name
               Value: !If
                 - ThreeTier
-                - !Sub ${Project}-${Environment}-rt-private-application-az{$index}
-                - !Sub ${Project}-${Environment}-rt-private-az{$index}
-            - Key: project
-              Value: !Ref Project
-            - Key: environment
-              Value: !Ref Environment
+                - !Sub ${Project}-${Environment}-rt-private-application-az${AZIndex}
+                - !Sub ${Project}-${Environment}-rt-private-az${AZIndex}
           VpcId: !Ref EC2VPC
-      EC2SubnetRouteTableAssociationPrivate1AZ{$INDEX}:
+      EC2SubnetRouteTableAssociationPrivate1AZ${AZIndex}:
         Type: AWS::EC2::SubnetRouteTableAssociation
         Properties:
-          RouteTableId: !Ref EC2RouteTablePrivate1AZ{$INDEX}
-          SubnetId: !Ref EC2SubnetPrivate1AZ{$INDEX}
-      EC2RouteIPv4Private1AZ{$INDEX}:
+          RouteTableId: !Ref
+            Fn::Sub: EC2RouteTablePrivate1AZ${AZIndex}
+          SubnetId: !Ref
+            Fn::Sub: EC2SubnetPrivate1AZ${AZIndex}
+      EC2RouteIPv4Private1AZ${AZIndex}:
         Type: AWS::EC2::Route
         Properties:
           DestinationCidrBlock: 0.0.0.0/0
-          NatGatewayId: !Ref EC2NatGatewayAZ{$INDEX}
-          RouteTableId: !Ref EC2RouteTablePrivate1AZ{$INDEX}
-      EC2EIPNatGatewayAZ{$INDEX}:
+          NatGatewayId: !Ref
+            Fn::Sub: EC2NatGatewayAZ${AZIndex}
+          RouteTableId: !Ref
+            Fn::Sub: EC2RouteTablePrivate1AZ${AZIndex}
+      EC2EIPNatGatewayAZ${AZIndex}:
         Type: AWS::EC2::EIP
         DependsOn: EC2VPCGatewayAttachment
         Properties:
           Domain: vpc
           Tags:
             - Key: Name
-              Value: !Sub ${Project}-${Environment}-eip-nat-az{$index}
-            - Key: project
-              Value: !Ref Project
-            - Key: environment
-              Value: !Ref Environment
-      EC2NatGatewayAZ{$INDEX}:
+              Value: !Sub ${Project}-${Environment}-eip-nat-az${AZIndex}
+      EC2NatGatewayAZ${AZIndex}:
         Type: AWS::EC2::NatGateway
         Properties:
-          AllocationId: !GetAtt EC2EIPNatGatewayAZ{$INDEX}.AllocationId
-          SubnetId: !Ref EC2SubnetPublicAZ{$INDEX}
+          AllocationId: !GetAtt
+            - !Sub EC2EIPNatGatewayAZ${AZIndex}
+            - AllocationId
+          SubnetId:
+            Ref:
+              !Sub EC2SubnetPublicAZ${AZIndex}
           Tags:
             - Key: Name
-              Value: !Sub ${Project}-${Environment}-nat-az{$index}
-            - Key: project
-              Value: !Ref Project
-            - Key: environment
-              Value: !Ref Environment
-      EC2SubnetPrivate2AZ{$INDEX}:
-        Condition: ThreeTier
+              Value: !Sub ${Project}-${Environment}-nat-az${AZIndex}
+      EC2SubnetPrivate2AZ${AZIndex}:
         Type: AWS::EC2::Subnet
+        Condition: ThreeTier
         Properties:
-          AvailabilityZone: !Select
-            - 0
-            - !GetAZs
+          AvailabilityZoneId: !Select
+            - Fn::FindInMap:
+                - AZIndexMap
+                - !Sub ${AZIndex}
+                - First
+            - !Ref AZIDs
           CidrBlock: !Select
-            - 2
+            - Fn::FindInMap:
+                - SubnetIndexMap
+                - !Sub ${AZIndex}
+                - Third
             - !Cidr
               - !Ref EC2VPCCidrBlock
               - 9
@@ -277,27 +272,21 @@ Resources:
           MapPublicIpOnLaunch: false
           Tags:
             - Key: Name
-              Value: !Sub ${Project}-${Environment}-private-database-az{$index}
-            - Key: project
-              Value: !Ref Project
-            - Key: environment
-              Value: !Ref Environment
+              Value: !Sub ${Project}-${Environment}-private-database-az${AZIndex}
           VpcId: !Ref EC2VPC
-      EC2RouteTablePrivate2AZ{$INDEX}:
-        Condition: ThreeTier
+      EC2RouteTablePrivate2AZ${AZIndex}:
         Type: AWS::EC2::RouteTable
+        Condition: ThreeTier
         Properties:
           Tags:
             - Key: Name
-              Value: !Sub ${Project}-${Environment}-rt-private-database-az{$index}
-            - Key: project
-              Value: !Ref Project
-            - Key: environment
-              Value: !Ref Environment
+              Value: !Sub ${Project}-${Environment}-rt-private-database-az${AZIndex}
           VpcId: !Ref EC2VPC
-      EC2SubnetRouteTableAssociationPrivate2AZ{$INDEX}:
-        Condition: ThreeTier
+      EC2SubnetRouteTableAssociationPrivate2AZ${AZIndex}:
         Type: AWS::EC2::SubnetRouteTableAssociation
+        Condition: ThreeTier
         Properties:
-          RouteTableId: !Ref EC2RouteTablePrivate2AZ{$INDEX}
-          SubnetId: !Ref EC2SubnetPrivate2AZ{$INDEX}
+          RouteTableId: !Ref
+            Fn::Sub: EC2RouteTablePrivate2AZ${AZIndex}
+          SubnetId: !Ref
+            Fn::Sub: EC2SubnetPrivate2AZ${AZIndex}

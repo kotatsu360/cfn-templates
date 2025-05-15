@@ -1,0 +1,21 @@
+Parameters:
+  Project: my-sample-network
+
+  Environment: dev
+
+  EC2VPCCidrBlock: 10.0.0.0/16
+
+  SubnetCidrBits: 8
+
+  NetworkRedundancy: multi-az-3
+
+  NetworkLayer: public-private
+
+  AZIDs: apne1-az1,apne1-az2,apne1-az4
+
+Tags:
+  Project: my-sample-network
+  Environment: dev
+
+
+
